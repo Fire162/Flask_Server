@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template
 import sqlite3
+import json
 
 app = Flask(__name__)
 
@@ -24,7 +25,8 @@ def get_data():
         cursor.execute('SELECT data FROM data_store WHERE key = ?', (key,))
         row = cursor.fetchone()
         if row:
-            return jsonify({'data': row[0]}), 200
+            value = json.loads(row[0])
+            return jsonify({'data': value}), 200
         return jsonify({'error': 'Key not found'}), 404
 
 @app.route('/saveData', methods=['POST'])
@@ -35,10 +37,12 @@ def save_data():
     if not key or value is None:
         return jsonify({'success': False, 'error': 'Invalid key or data'}), 400
 
+    value_str = json.dumps(value)
+
     with sqlite3.connect('data.db') as conn:
         cursor = conn.cursor()
         try:
-            cursor.execute('INSERT OR REPLACE INTO data_store (key, data) VALUES (?, ?)', (key, value))
+            cursor.execute('INSERT OR REPLACE INTO data_store (key, data) VALUES (?, ?)', (key, value_str))
             conn.commit()
             return jsonify({'success': True}), 200
         except sqlite3.Error as e:
