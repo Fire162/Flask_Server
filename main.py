@@ -1,8 +1,9 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 import sqlite3
 
 app = Flask(__name__)
 
+@app.before_first_request
 def init_db():
     with sqlite3.connect('data.db') as conn:
         cursor = conn.cursor()
@@ -43,6 +44,14 @@ def save_data():
         except sqlite3.Error as e:
             return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.errorhandler(404)
+def page_not_found(error):
+    return render_template('404.html'), 404
+
+@app.route('/documentation')
+def documentation():
+    return render_template('documentation.html')
+
 if __name__ == '__main__':
-    init_db()
     app.run(debug=True, host='0.0.0.0', port=80)
+    
