@@ -3,7 +3,7 @@ import sqlite3
 
 app = Flask(__name__)
 
-@app.before_first_request
+@app.before_request
 def init_db():
     with sqlite3.connect('data.db') as conn:
         cursor = conn.cursor()
