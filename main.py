@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template
 import sqlite3
 import json
+import telebot
 
 app = Flask(__name__)
 
@@ -11,6 +12,11 @@ def init_db():
         cursor.execute('''CREATE TABLE IF NOT EXISTS data_store (
                             key TEXT PRIMARY KEY,
                             data TEXT NOT NULL
+                        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+                            bot_id TEXT,
+                            user_id TEXT,
+                            UNIQUE(bot_id, user_id)
                         )''')
         conn.commit()
 
@@ -47,6 +53,90 @@ def save_data():
             return jsonify({'success': True}), 200
         except sqlite3.Error as e:
             return jsonify({'success': False, 'error': str(e)}), 500
+
+def validate_bot_token(bot_token):
+    bot = telebot.TeleBot(bot_token)
+    try:
+        user = bot.get_me()
+        return True, user
+    except telebot.apihelper.ApiException:
+        return False, None
+
+def save_user_to_db(bot_id, user_id):
+    conn = sqlite3.connect('data.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR IGNORE INTO users (bot_id, user_id)
+        VALUES (?, ?)
+    ''', (bot_id, user_id))
+    conn.commit()
+    conn.close()
+
+def get_users_from_db(bot_id):
+    conn = sqlite3.connect('data.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT user_id FROM users WHERE bot_id = ?
+    ''', (bot_id,))
+    users = cursor.fetchall()
+    conn.close()
+    return [user[0] for user in users]
+
+def broadcast_message(bot_token, user_ids, message):
+    bot = telebot.TeleBot(bot_token)
+    for user_id in user_ids:
+        try:
+            bot.send_message(user_id, message, parse_mode='HTML')
+        except telebot.apihelper.ApiException as e:
+            print(f"Failed to send message to {user_id}: {e}")
+
+@app.route('/saveUser', methods=['POST'])
+def save_user():
+    try:
+        data = json.loads(request.data)
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    bot_token = data.get('bot_token')
+    user_ids = data.get('user_ids')
+
+    if not bot_token or not user_ids:
+        return jsonify({"error": "Missing bot_token or user_ids"}), 400
+
+    if not isinstance(user_ids, list):
+        return jsonify({"error": "user_ids should be a list"}), 400
+
+    valid, user = validate_bot_token(bot_token)
+    if not valid:
+        return jsonify({"error": "Invalid bot token"}), 400
+
+    bot_id = user.id
+    for user_id in user_ids:
+        save_user_to_db(bot_id, user_id)
+
+    return jsonify({"status": "Users saved"}), 200
+
+@app.route('/broadcast', methods=['POST'])
+def broadcast():
+    try:
+        data = json.loads(request.data)
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    bot_token = data.get('bot_token')
+    message = data.get('message')
+
+    if not bot_token or not message:
+        return jsonify({"error": "Missing bot_token or message"}), 400
+
+    valid, user = validate_bot_token(bot_token)
+    if not valid:
+        return jsonify({"error": "Invalid bot token"}), 400
+
+    bot_id = user.id
+    user_ids = get_users_from_db(bot_id)
+    broadcast_message(bot_token, user_ids, message)
+    return jsonify({"status": "Message broadcasted"}), 200
 
 @app.errorhandler(404)
 def page_not_found(error):
