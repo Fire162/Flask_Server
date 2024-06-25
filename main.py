@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, render_template
 import sqlite3
 import json
 import telebot
+import requests
 
 app = Flask(__name__)
 
@@ -82,13 +83,18 @@ def get_users_from_db(bot_id):
     conn.close()
     return [user[0] for user in users]
 
-def broadcast_message(bot_token, user_ids, message):
+def broadcast_message(bot_token, user_ids, msg):
     bot = telebot.TeleBot(bot_token)
+    success = 0
+    fail = 0
     for user_id in user_ids:
         try:
-            bot.send_message(user_id, message, parse_mode='HTML')
+            bot.send_message(user_id, msg, parse_mode='HTML')
+            success += 1
         except telebot.apihelper.ApiException as e:
             print(f"Failed to send message to {user_id}: {e}")
+            fail += 1
+    return success, fail
 
 @app.route('/saveUser', methods=['POST'])
 def save_user():
@@ -124,10 +130,11 @@ def broadcast():
         return jsonify({"error": "Invalid JSON"}), 400
 
     bot_token = data.get('bot_token')
-    message = data.get('message')
+    msg = data.get('message')
+    report_url = data.get('report_url')
 
-    if not bot_token or not message:
-        return jsonify({"error": "Missing bot_token or message"}), 400
+    if not bot_token or not msg or not report_url:
+        return jsonify({"error": "Missing bot_token, message, or report_url"}), 400
 
     valid, user = validate_bot_token(bot_token)
     if not valid:
@@ -135,8 +142,17 @@ def broadcast():
 
     bot_id = user.id
     user_ids = get_users_from_db(bot_id)
-    broadcast_message(bot_token, user_ids, message)
-    return jsonify({"status": "Message broadcasted"}), 200
+    success, fail = broadcast_message(bot_token, user_ids, msg)
+    
+    stats = {
+        'total_users': len(user_ids),
+        'failed': fail,
+        'success': success
+    }
+
+    requests.post(report_url, json=stats)
+
+    return jsonify({"status": "Message broadcasted", "stats": stats}), 200
 
 @app.errorhandler(404)
 def page_not_found(error):
@@ -148,4 +164,4 @@ def documentation():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=80)
-    
+        
